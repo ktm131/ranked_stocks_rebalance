@@ -117,7 +117,7 @@ if spy_last is None or ema_last is None:
     st.error("❌ Brak aktualnych danych SPY – spróbuj odświeżyć stronę za kilka minut.")
     st.stop()
 
-risk_on = spy_last >= ema_last
+risk_on = bool(float(spy_last) >= float(ema_last))
 
 c1, c2, c3 = st.columns(3)
 c1.metric("SPY (weekly)", fmt(spy_last))
