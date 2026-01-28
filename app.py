@@ -147,7 +147,7 @@ momentum = prices.iloc[-1] / prices.iloc[-MOM_LOOKBACK] - 1
 # FUNDAMENTY
 # ==================================================
 
-fund = load_fundamentals(prices.columns)
+fund = load_fundamentals(list(prices.columns))
 
 df = fund.merge(
     momentum.rename("Momentum"),
