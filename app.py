@@ -4,6 +4,9 @@ import pandas as pd
 import numpy as np
 from datetime import date
 
+def fmt(x):
+    return f"{x:.2f}" if isinstance(x, (int, float, np.floating)) else "—"
+
 # ==================================================
 # KONFIGURACJA STRONY
 # ==================================================
@@ -107,14 +110,18 @@ if len(weekly_spy) < MIN_WEEKS:
     st.error("❌ Za mało danych do obliczenia EMA200 (weekly)")
     st.stop()
 
-spy_last = weekly_spy.iloc[-1]
-ema_last = ema200.iloc[-1]
+spy_last = weekly_spy.dropna().iloc[-1] if not weekly_spy.dropna().empty else None
+ema_last = ema200.dropna().iloc[-1] if not ema200.dropna().empty else None
+
+if spy_last is None or ema_last is None:
+    st.error("❌ Brak aktualnych danych SPY – spróbuj odświeżyć stronę za kilka minut.")
+    st.stop()
 
 risk_on = spy_last >= ema_last
 
 c1, c2, c3 = st.columns(3)
-c1.metric("SPY (weekly)", f"{spy_last:.2f}")
-c2.metric("EMA200 (weekly)", f"{ema_last:.2f}")
+c1.metric("SPY (weekly)", fmt(spy_last))
+c2.metric("EMA200 (weekly)", fmt(ema_last))
 c3.metric("Market Regime", "RISK ON 🟢" if risk_on else "RISK OFF 🔴")
 
 st.divider()
@@ -195,3 +202,8 @@ st.dataframe(
 )
 
 st.caption(f"Stan na: {date.today().isoformat()}")
+
+if st.sidebar.button("🔄 Wyczyść cache"):
+    st.cache_data.clear()
+    st.experimental_rerun()
+
