@@ -4,15 +4,25 @@ import pandas as pd
 import numpy as np
 from datetime import date
 
-st.set_page_config(page_title="Stock Strategy Dashboard", layout="wide")
+# ==================================================
+# KONFIGURACJA STRONY
+# ==================================================
 
-# =============================
-# PARAMETRY
-# =============================
+st.set_page_config(
+    page_title="Fundamental + Momentum Strategy",
+    layout="wide"
+)
+
+st.title("📊 Fundamental + Momentum – Stock Selector")
+
+# ==================================================
+# PARAMETRY STRATEGII
+# ==================================================
 
 N_STOCKS = 15
-LOOKBACK_MOM = 126
-START_DATE = "2012-01-01"
+MOM_LOOKBACK = 126       # 6 miesięcy
+MIN_WEEKS = 210          # bezpieczeństwo dla EMA200
+CACHE_TTL = 600          # 10 minut
 
 TICKERS = [
     "AAPL","MSFT","GOOGL","AMZN","META","NVDA","TSLA",
@@ -26,90 +36,122 @@ TICKERS = [
     "ICE","CME","SPGI","MCO","MSCI","FIS","FICO","NDAQ"
 ]
 
-st.title("📊 Fundamental + Momentum Strategy")
+# ==================================================
+# CACHE: FILTR RYNKU
+# ==================================================
 
-# =============================
-# FILTR RYNKU
-# =============================
+@st.cache_data(ttl=CACHE_TTL)
+def load_market_filter():
+    spy = yf.download(
+        "SPY",
+        period="10y",
+        auto_adjust=True,
+        progress=False
+    )["Close"]
 
-spy = yf.download("SPY", start=START_DATE, auto_adjust=True, progress=False)["Close"]
-weekly_spy = spy.resample("W-FRI").last()
-ema200 = weekly_spy.ewm(span=200).mean()
+    weekly = spy.resample("W-FRI").last()
+    ema200 = weekly.ewm(span=200).mean()
 
-risk_on = weekly_spy.iloc[-1] >= ema200.iloc[-1]
+    return weekly, ema200
 
-col1, col2 = st.columns(2)
+# ==================================================
+# CACHE: CENY AKCJI
+# ==================================================
 
-with col1:
-    st.metric("SPY (weekly)", f"{weekly_spy.iloc[-1]:.2f}")
+@st.cache_data(ttl=CACHE_TTL)
+def load_prices(tickers):
+    prices = yf.download(
+        tickers,
+        period="2y",
+        auto_adjust=True,
+        progress=False
+    )["Close"]
 
-with col2:
-    st.metric("EMA200 (weekly)", f"{ema200.iloc[-1]:.2f}")
+    return prices.dropna(axis=1)
 
-st.divider()
+# ==================================================
+# CACHE: FUNDAMENTY
+# ==================================================
 
-# =============================
-# STATUS RYNKU
-# =============================
+@st.cache_data(ttl=CACHE_TTL)
+def load_fundamentals(tickers):
+    rows = []
 
-if risk_on:
-    st.success("🟢 RISK ON — strategia MA ekspozycję na akcje")
-else:
-    st.error("🔴 RISK OFF — strategia BEZ ekspozycji (cash)")
-
-# =============================
-# JEŚLI RISK OFF → KONIEC
-# =============================
-
-if not risk_on:
-    st.stop()
-
-# =============================
-# DANE CENOWE
-# =============================
-
-prices = yf.download(
-    TICKERS,
-    period="2y",
-    auto_adjust=True,
-    progress=False
-)["Close"]
-
-prices = prices.dropna(axis=1)
-momentum = prices.iloc[-1] / prices.iloc[-LOOKBACK_MOM] - 1
-
-# =============================
-# FUNDAMENTY
-# =============================
-
-rows = []
-
-with st.spinner("Pobieranie danych fundamentalnych..."):
-    for t in prices.columns:
+    for t in tickers:
         try:
             info = yf.Ticker(t).info
 
-            roe = info.get("returnOnEquity", np.nan)
-            fcf = info.get("freeCashflow", np.nan)
-            mkt = info.get("marketCap", np.nan)
-            rev = info.get("revenueGrowth", np.nan)
-            eps = info.get("earningsGrowth", np.nan)
-
-            fcf_yield = fcf / mkt if fcf and mkt else np.nan
-
-            rows.append([t, roe, fcf_yield, rev, eps, momentum[t]])
-
+            rows.append({
+                "Ticker": t,
+                "ROE": info.get("returnOnEquity", np.nan),
+                "FCF": info.get("freeCashflow", np.nan),
+                "MarketCap": info.get("marketCap", np.nan),
+                "Rev_Growth": info.get("revenueGrowth", np.nan),
+                "EPS_Growth": info.get("earningsGrowth", np.nan),
+            })
         except:
             continue
 
-df = pd.DataFrame(
-    rows,
-    columns=["Ticker","ROE","FCF_Yield","Rev_Growth","EPS_Growth","Momentum"]
+    df = pd.DataFrame(rows)
+    df["FCF_Yield"] = df["FCF"] / df["MarketCap"]
+
+    return df
+
+# ==================================================
+# FILTR RYNKU – RISK ON / OFF
+# ==================================================
+
+weekly_spy, ema200 = load_market_filter()
+
+if len(weekly_spy) < MIN_WEEKS:
+    st.error("❌ Za mało danych do obliczenia EMA200 (weekly)")
+    st.stop()
+
+spy_last = weekly_spy.iloc[-1]
+ema_last = ema200.iloc[-1]
+
+risk_on = spy_last >= ema_last
+
+c1, c2, c3 = st.columns(3)
+c1.metric("SPY (weekly)", f"{spy_last:.2f}")
+c2.metric("EMA200 (weekly)", f"{ema_last:.2f}")
+c3.metric("Market Regime", "RISK ON 🟢" if risk_on else "RISK OFF 🔴")
+
+st.divider()
+
+# ==================================================
+# JEŚLI RISK OFF → STOP
+# ==================================================
+
+if not risk_on:
+    st.warning("Strategia aktualnie NIE posiada ekspozycji na akcje.")
+    st.caption(f"Stan na: {date.today().isoformat()}")
+    st.stop()
+
+# ==================================================
+# MOMENTUM
+# ==================================================
+
+prices = load_prices(TICKERS)
+
+momentum = prices.iloc[-1] / prices.iloc[-MOM_LOOKBACK] - 1
+
+# ==================================================
+# FUNDAMENTY
+# ==================================================
+
+fund = load_fundamentals(prices.columns)
+
+df = fund.merge(
+    momentum.rename("Momentum"),
+    left_on="Ticker",
+    right_index=True,
+    how="inner"
 )
 
-# =============================
-# FILTRY
-# =============================
+# ==================================================
+# FILTRY JAKOŚCIOWE
+# ==================================================
 
 df = df[
     (df["ROE"] > 0.10) &
@@ -117,9 +159,9 @@ df = df[
     (df["Momentum"] > 0)
 ]
 
-# =============================
+# ==================================================
 # SCORE
-# =============================
+# ==================================================
 
 df["Score"] = (
     df["ROE"].rank(pct=True) * 0.20 +
@@ -131,20 +173,23 @@ df["Score"] = (
 
 df = df.sort_values("Score", ascending=False).head(N_STOCKS)
 
-# =============================
-# WYNIKI
-# =============================
+# ==================================================
+# WYNIK
+# ==================================================
 
-st.subheader("🏆 Aktualne spółki w portfelu")
+st.subheader("🏆 Aktualne spółki w strategii")
 
 st.dataframe(
-    df.style.format({
+    df[[
+        "Ticker","Score","Momentum",
+        "ROE","FCF_Yield","Rev_Growth","EPS_Growth"
+    ]].style.format({
+        "Score": "{:.3f}",
+        "Momentum": "{:.2%}",
         "ROE": "{:.2%}",
         "FCF_Yield": "{:.2%}",
         "Rev_Growth": "{:.2%}",
         "EPS_Growth": "{:.2%}",
-        "Momentum": "{:.2%}",
-        "Score": "{:.3f}"
     }),
     use_container_width=True
 )
