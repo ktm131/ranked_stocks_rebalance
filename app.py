@@ -12,11 +12,11 @@ def fmt(x):
 # ==================================================
 
 st.set_page_config(
-    page_title="Fundamental + Momentum Strategy",
+    page_title="Pure Momentum Strategy",
     layout="wide"
 )
 
-st.title("📊 Fundamental + Momentum – Stock Selector")
+st.title("📈 Pure Momentum – Stock Selector (MTL)")
 
 # ==================================================
 # PARAMETRY STRATEGII
@@ -24,23 +24,87 @@ st.title("📊 Fundamental + Momentum – Stock Selector")
 
 N_STOCKS = 15
 MOM_LOOKBACK = 126       # 6 miesięcy
+VOL_LOOKBACK = 63        # 3 miesiące (risk adjustment)
 MIN_WEEKS = 210          # bezpieczeństwo dla EMA200
 CACHE_TTL = 600          # 10 minut
 
 TICKERS = [
-    "AAPL","MSFT","GOOGL","AMZN","META","NVDA","TSLA",
-    "JPM","V","MA","HD","UNH","JNJ","PG","KO","PEP",
-    "XOM","CVX","ABBV","MRK","COST","AVGO","ADBE",
-    "ADSK","INTU","NOW","SNPS","CDNS","TEAM","MDB","DDOG","NET",
-    "AMAT","LRCX","KLAC","MCHP","ON","MPWR","QRVO","SWKS",
-    "REGN","VRTX","BIIB","IDXX","IQV","EW","ISRG","DXCM",
-    "ROK","PH","ITW","EMR","ETN","AME","FAST","GWW",
-    "POOL","ULTA","ORLY","AZO","DPZ","SBUX","LOW","TJX",
-    "ICE","CME","SPGI","MCO","MSCI","FIS","FICO","NDAQ"
+        # ===== MEGA / BIG TECH =====
+    "AAPL","MSFT","GOOGL","GOOG","AMZN","META","NVDA","TSLA",
+    "AVGO","ORCL","CRM","IBM","INTC","AMD","QCOM","TXN","MU",
+    "SHOP","PYPL","UBER","LYFT","SNOW","PLTR","RIVN",
+    "LCID","ZM","DOCU","SPOT","ROKU","PINS","SNAP",
+
+
+    # ===== FINANCIALS =====
+    "JPM","BAC","WFC","C","GS","MS","BLK","SCHW",
+    "V","MA","AXP","COF","PNC","USB","TFC","AIG","MET","PRU","ALL",
+    "CB","TRV","AJG","WTW","MTB","FITB",
+
+
+    # ===== HEALTHCARE =====
+    "UNH","JNJ","PFE","MRK","ABBV","LLY","BMY","AMGN",
+    "GILD","VRTX","REGN","ISRG","TMO","DHR","ABT","MDT",
+    "CVS","CI","HCA","ZBH","EW","ILMN","BIIB",
+    "MRNA","BNTX","DXCM","ALGN","IDXX","TECH",
+
+
+    # ===== CONSUMER STAPLES =====
+    "PG","KO","PEP","COST","WMT","TGT","CL","KMB","MDLZ",
+    "KR","SYY","HSY","GIS","KHC","CPB","EL",
+    "STZ","BF-B","TAP",
+
+
+    # ===== CONSUMER DISCRETIONARY =====
+    "HD","LOW","NKE","SBUX","MCD","BKNG","ABNB","TJX",
+    "ROST","ORLY","AZO","ULTA","DPZ","EBAY","ETSY","W",
+    "CHWY","BBY","BBWI","LEN","DHI","NVR","PHM",
+
+    # ===== INDUSTRIALS =====
+    "CAT","DE","HON","GE","RTX","LMT","NOC",
+    "ETN","EMR","PH","ROK","ITW","FAST","GWW",
+    "BA","GD","TDG","JCI","CARR","OTIS",
+    "DAL","AAL","UAL","LUV",
+
+
+    # ===== ENERGY =====
+    "XOM","CVX","COP","SLB","EOG","MPC","VLO","OXY",
+    "DVN","HAL","BKR","KMI","WMB",
+    "PSX","FANG",
+
+
+    # ===== MATERIALS =====
+    "LIN","APD","ECL","SHW","FCX","NEM","DOW","RIO",
+    "BHP","VALE","AA","NUE","STLD","MLM","VMC",
+
+
+    # ===== REAL ESTATE =====
+    "PLD","AMT","CCI","EQIX","PSA","O","SPG","DLR","WELL",
+    "AVB","EQR","ESS","VICI","ARE",
+
+    # ===== SOFTWARE / CLOUD =====
+    "ADBE","INTU","NOW","SNPS","CDNS","ADSK",
+    "TEAM","MDB","DDOG","NET","CRWD","ZS","OKTA",
+    "PANW","FTNT","ESTC","AI",
+    "PATH","HUBS","WDAY",
+
+
+    # ===== SEMICONDUCTORS =====
+    "AMAT","LRCX","KLAC","ASML","ON","MPWR","SWKS","QRVO",
+    "NXPI","ADI","MCHP","TER","ENTG",
+    "LSCC","COHR","IPGP",
+
+
+    # ===== EXCHANGES / DATA =====
+    "ICE","CME","SPGI","MCO","MSCI","NDAQ","FICO",
+
+    # ===== TELECOM / MEDIA =====
+    "T","VZ","TMUS","CMCSA","CHTR",
+    "DIS","WBD"
 ]
 
 # ==================================================
-# CACHE: FILTR RYNKU
+# CACHE: FILTR RYNKU (SPY WEEKLY)
 # ==================================================
 
 @st.cache_data(ttl=CACHE_TTL)
@@ -73,34 +137,6 @@ def load_prices(tickers):
     return prices.dropna(axis=1)
 
 # ==================================================
-# CACHE: FUNDAMENTY
-# ==================================================
-
-@st.cache_data(ttl=CACHE_TTL)
-def load_fundamentals(tickers):
-    rows = []
-
-    for t in tickers:
-        try:
-            info = yf.Ticker(t).info
-
-            rows.append({
-                "Ticker": t,
-                "ROE": info.get("returnOnEquity", np.nan),
-                "FCF": info.get("freeCashflow", np.nan),
-                "MarketCap": info.get("marketCap", np.nan),
-                "Rev_Growth": info.get("revenueGrowth", np.nan),
-                "EPS_Growth": info.get("earningsGrowth", np.nan),
-            })
-        except:
-            continue
-
-    df = pd.DataFrame(rows)
-    df["FCF_Yield"] = df["FCF"] / df["MarketCap"]
-
-    return df
-
-# ==================================================
 # FILTR RYNKU – RISK ON / OFF
 # ==================================================
 
@@ -110,12 +146,8 @@ if len(weekly_spy) < MIN_WEEKS:
     st.error("❌ Za mało danych do obliczenia EMA200 (weekly)")
     st.stop()
 
-spy_last = weekly_spy.dropna().iloc[-1] if not weekly_spy.dropna().empty else None
-ema_last = ema200.dropna().iloc[-1] if not ema200.dropna().empty else None
-
-if spy_last is None or ema_last is None:
-    st.error("❌ Brak aktualnych danych SPY – spróbuj odświeżyć stronę za kilka minut.")
-    st.stop()
+spy_last = weekly_spy.dropna().iloc[-1]
+ema_last = ema200.dropna().iloc[-1]
 
 risk_on = bool(float(spy_last) >= float(ema_last))
 
@@ -126,57 +158,32 @@ c3.metric("Market Regime", "RISK ON 🟢" if risk_on else "RISK OFF 🔴")
 
 st.divider()
 
-# ==================================================
-# JEŚLI RISK OFF → STOP
-# ==================================================
-
 if not risk_on:
     st.warning("Strategia aktualnie NIE posiada ekspozycji na akcje.")
     st.caption(f"Stan na: {date.today().isoformat()}")
     st.stop()
 
 # ==================================================
-# MOMENTUM
+# MOMENTUM + VOLATILITY
 # ==================================================
 
 prices = load_prices(TICKERS)
+returns = prices.pct_change()
 
 momentum = prices.iloc[-1] / prices.iloc[-MOM_LOOKBACK] - 1
+volatility = returns.rolling(VOL_LOOKBACK).std().iloc[-1]
 
-# ==================================================
-# FUNDAMENTY
-# ==================================================
+df = pd.DataFrame({
+    "Ticker": momentum.index,
+    "Momentum": momentum.values,
+    "Volatility": volatility.values
+}).dropna()
 
-fund = load_fundamentals(list(prices.columns))
+# Absolute momentum filter
+df = df[df["Momentum"] > 0]
 
-df = fund.merge(
-    momentum.rename("Momentum"),
-    left_on="Ticker",
-    right_index=True,
-    how="inner"
-)
-
-# ==================================================
-# FILTRY JAKOŚCIOWE
-# ==================================================
-
-df = df[
-    (df["ROE"] > 0.10) &
-    (df["FCF_Yield"] > 0) &
-    (df["Momentum"] > 0)
-]
-
-# ==================================================
-# SCORE
-# ==================================================
-
-df["Score"] = (
-    df["ROE"].rank(pct=True) * 0.20 +
-    df["FCF_Yield"].rank(pct=True) * 0.20 +
-    df["Rev_Growth"].rank(pct=True) * 0.10 +
-    df["EPS_Growth"].rank(pct=True) * 0.10 +
-    df["Momentum"].rank(pct=True) * 0.40
-)
+# Risk-adjusted momentum score
+df["Score"] = df["Momentum"] / df["Volatility"]
 
 df = df.sort_values("Score", ascending=False).head(N_STOCKS)
 
@@ -184,19 +191,13 @@ df = df.sort_values("Score", ascending=False).head(N_STOCKS)
 # WYNIK
 # ==================================================
 
-st.subheader("🏆 Aktualne spółki w strategii")
+st.subheader("🏆 Aktualne spółki w strategii (Pure Momentum)")
 
 st.dataframe(
-    df[[
-        "Ticker","Score","Momentum",
-        "ROE","FCF_Yield","Rev_Growth","EPS_Growth"
-    ]].style.format({
+    df[["Ticker","Score","Momentum","Volatility"]].style.format({
         "Score": "{:.3f}",
         "Momentum": "{:.2%}",
-        "ROE": "{:.2%}",
-        "FCF_Yield": "{:.2%}",
-        "Rev_Growth": "{:.2%}",
-        "EPS_Growth": "{:.2%}",
+        "Volatility": "{:.2%}"
     }),
     use_container_width=True
 )
@@ -206,4 +207,3 @@ st.caption(f"Stan na: {date.today().isoformat()}")
 if st.sidebar.button("🔄 Wyczyść cache"):
     st.cache_data.clear()
     st.experimental_rerun()
-
